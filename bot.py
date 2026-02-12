@@ -1,6 +1,6 @@
 # app.py
 # Don't Remove Credit @teacher_slex
-# Subscribe YouTube ƈɦǟռռɛʟ For Amazing Bot @Tech_VJ
+# Subscribe YouTube Channel For Amazing Bot @Tech_VJ
 # Ask Doubt on telegram @KingVJ01
 
 import os
@@ -12,11 +12,11 @@ from pyrogram import Client, filters, idle, errors
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, ChatJoinRequest
 from pyrogram.errors.exceptions.flood_420 import FloodWait
 
-# Aapki database aur config files waisi ki waisi rahengi
+# Aapka database.py import
 from database import add_user, add_group, all_users, all_groups, users
 from configs import cfg
 
-# Logging Setup (Render logs dekhne ke liye zaroori hai)
+# Logging Setup (Debugging ke liye zaroori hai)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -31,26 +31,39 @@ bot = Client(
     bot_token=cfg.BOT_TOKEN
 )
 
-#━━━━━━━━━━━━━━━━━━━━ HELPER ━━━━━━━━━━━━━━━━━━━━
-def parse_post_link(link: str):
-    parts = link.split("/")
-    chat = parts[-2]
-    msg_id = int(parts[-1])
-    return chat, msg_id
+# ---------- Helper Functions ----------
 
-#━━━━━━━━━━━━━━━━━━━━ JOIN REQUEST (10 SEC DELAY + WELCOME) ━━━━━━━━━━━━━━━━━━━━
+async def handle_index(request):
+    """Web Server ka response taaki Render sota na rahe"""
+    return web.Response(text="Bot is Running Successfully!")
+
+async def start_web_server():
+    """Render ke liye Fake Web Server"""
+    port = int(os.environ.get("PORT", "8080"))
+    app = web.Application()
+    app.router.add_get('/', handle_index)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    log.info(f"🌍 Web Server Started on Port {port}")
+    return runner
+
+#━━━━━━━━━━━━━━━━━━━━ JOIN REQUEST (10 SEC DELAY) ━━━━━━━━━━━━━━━━━━━━
 @bot.on_chat_join_request()
 async def approve(client: Client, m: ChatJoinRequest):
     try:
         chat = m.chat
         user = m.from_user
         
-        # Log print karega
         log.info(f"📥 New Request: {user.first_name} in {chat.title}")
 
-        # Database update
-        add_group(chat.id)
-        add_user(user.id)
+        # Database me add karo
+        try:
+            add_group(chat.id)
+            add_user(user.id)
+        except Exception as e:
+            log.error(f"DB Error: {e}")
 
         # ⏳ 10 SECOND WAIT
         await asyncio.sleep(10)
@@ -62,7 +75,7 @@ async def approve(client: Client, m: ChatJoinRequest):
         except errors.UserAlreadyParticipant:
             pass
         except Exception as e:
-            log.error(f"Approval Error: {e}")
+            log.error(f"Approval Failed: {e}")
             return
 
         # ✅ WELCOME MESSAGE (DM)
@@ -70,172 +83,134 @@ async def approve(client: Client, m: ChatJoinRequest):
             await client.send_message(
                 user.id,
                 f"👋 Hello {user.first_name}!\n\n"
-                f"✅ Aapka join request **{chat.title}** me approve ho gaya hai.\n"
-                "🎉 Welcome to the group!"
+                f"✅ Your request to join **{chat.title}** has been approved.\n"
+                "🎉 Welcome!"
             )
         except Exception:
-            # Agar user ne bot block kiya ho to ignore karo
-            pass
+            pass # User blocked bot or privacy settings
 
     except FloodWait as e:
-        log.warning(f"FloodWait: Sleeping for {e.value}s")
         await asyncio.sleep(e.value)
-        # Retry logic optional
     except Exception as e:
-        log.exception("Error in approve handler")
+        log.error(f"Error in approve: {e}")
 
-#━━━━━━━━━━━━━━━━━━━━ ILLEGAL WORD DELETE (BAN WORDS) ━━━━━━━━━━━━━━━━━━━━
+#━━━━━━━━━━━━━━━━━━━━ ILLEGAL WORDS (BAN FILTER) ━━━━━━━━━━━━━━━━━━━━
 @bot.on_message(filters.group & filters.text)
 async def illegal_filter(_, m: Message):
     if not m.from_user:
         return
 
-    # 🔹 SUDO exempt (Admin ko ignore karega)
+    # Admin (SUDO) ko ignore karo
     if m.from_user.id in cfg.SUDO:
         return
 
     text = (m.text or "").lower()
 
     for word in cfg.ILLEGAL_WORDS:
-        # Regex taaki "hello" me "hell" match na kare (Sirf exact word pakdega)
+        # Sirf exact word match karega (e.g. "Hell" won't delete "Hello")
         pattern = r"\b" + re.escape(word.lower()) + r"\b"
         
         if re.search(pattern, text):
             try:
-                # Delete message
                 await m.delete()
-
-                # Warning message
-                try:
-                    sent = await m.chat.send_message(
-                        f"⚠️ {m.from_user.mention}, ye shabd allowed nahi hain. Aapka message delete kar diya gaya."
-                    )
-                    # 5 second baad warning delete kar do taaki chat gandi na ho
-                    await asyncio.sleep(5)
-                    await sent.delete()
-                except Exception:
-                    pass
+                # Optional Warning
+                msg = await m.reply(f"⚠️ {m.from_user.mention}, illegal words are not allowed!")
+                await asyncio.sleep(5)
+                await msg.delete()
             except Exception:
                 pass
             break
-
-#━━━━━━━━━━━━━━━━━━━━ AUTO-DELETE FOR MY MESSAGES (filters.me) ━━━━━━━━━━━━━━━━━━━━
-@bot.on_message(filters.me)
-async def auto_delete_illegal(_, m: Message):
-    try:
-        content = ""
-        if m.text:
-            content = m.text.lower()
-        elif m.caption:
-            content = m.caption.lower()
-
-        for word in cfg.ILLEGAL_WORDS:
-            if word.lower() in content:
-                await asyncio.sleep(0.1)
-                await m.delete()
-                return
-    except Exception:
-        pass
 
 #━━━━━━━━━━━━━━━━━━━━ START COMMAND ━━━━━━━━━━━━━━━━━━━━
 @bot.on_message(filters.private & filters.command("start"))
 async def start(_, m: Message):
     add_user(m.from_user.id)
 
-    # Agar user SUDO list me nahi hai
     if m.from_user.id not in cfg.SUDO:
         await m.reply_text(
-            "𝐁𝐇𝐀𝐈 𝐇𝐀𝐂𝐊 𝐒𝐄 𝐏𝐋𝐀𝐘 𝐊𝐑𝐎\n\n💸𝐏𝐑𝐎𝐅𝐈𝐓 𝐊𝐑𝐎🍻"
+            "👋 **Hello!**\n"
+            "I am an Auto Approver Bot.\n"
+            "Join any of my groups and I will accept you after 10 seconds!"
         )
         return
 
+    # Admin Panel
     keyboard = InlineKeyboardMarkup(
         [[
-            InlineKeyboardButton("🗯 ƈɦǟռռɛʟ", url="https://t.me/lnx_store"),
-            InlineKeyboardButton("💬 Support", url="https://t.me/teacher_slex")
+            InlineKeyboardButton("📢 Channel", url="https://t.me/lnx_store"),
+            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/teacher_slex")
         ]]
     )
 
     await m.reply_photo(
         photo="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhsaR6kRdTPF2ZMEgmgSYjjXU6OcsJhkBe1EWtI1nfbOziINTYzxjlGCMSVh-KoH05Z8MpRWhVV9TIX_ykpjdeGqJ1atXy1TUqrVkohUxlykoZyl67EfMQppHoWYrdHmdi6FMcL9v-Vew2VtaWHWY_eGZt-GN057jLGvYj7UV49g0rXVxoDFXQAYxvaX1xP/s1280/75447.jpg",
-        caption=(
-            f"**🦊 Hello {m.from_user.mention}!**\n\n"
-            "I'm an auto approve bot.\n"
-            "I handle join requests & DM users.\n\n"
-            "📢 Broadcast : /bcast\n"
-            "📊 Users : /users\n\n"
-            "__Powered By : @teacher_slex__"
-        ),
+        caption=f"**👮‍♂️ Admin Panel**\n\nHello Boss {m.from_user.mention}!",
         reply_markup=keyboard
     )
 
-#━━━━━━━━━━━━━━━━━━━━ USERS COUNT ━━━━━━━━━━━━━━━━━━━━
+#━━━━━━━━━━━━━━━━━━━━ USERS & GROUPS STATS ━━━━━━━━━━━━━━━━━━━━
 @bot.on_message(filters.command("users") & filters.user(cfg.SUDO))
 async def users_count(_, m: Message):
-    u = all_users()
-    g = all_groups()
-    await m.reply_text(f"🙋 Users : `{u}`\n👥 Groups : `{g}`\n📊 Total : `{u+g}`")
+    # Aapke database.py ke functions call ho rahe hain
+    u_count = all_users()
+    g_count = all_groups()
+    await m.reply_text(f"📊 **Stats:**\n\n👤 Users: `{u_count}`\n👥 Groups: `{g_count}`")
 
-#━━━━━━━━━━━━━━━━━━━━ BROADCAST ━━━━━━━━━━━━━━━━━━━━
+#━━━━━━━━━━━━━━━━━━━━ BROADCAST COMMAND ━━━━━━━━━━━━━━━━━━━━
 @bot.on_message(filters.command("bcast") & filters.user(cfg.SUDO))
 async def bcast(_, m: Message):
     if not m.reply_to_message:
-        return await m.reply("Reply to a message to broadcast.")
+        return await m.reply("❌ Please reply to a message to broadcast.")
 
-    status = await m.reply("⚡ Broadcasting...")
-    ok = fail = 0
-
-    # Database se saare users ko fetch karke message bhejna
-    all_db_users = users.find()  # Aapke database variable ka naam
+    msg = await m.reply("⚡ Broadcasting started...")
+    ok = 0
+    fail = 0
     
-    for u in all_db_users:
+    # Aapka database 'users' collection hai.
+    # Aapke DB me user_id STRING format me hai, Pyrogram ko INT chahiye.
+    all_users_cursor = users.find({}) 
+
+    for person in all_users_cursor:
         try:
-            await m.reply_to_message.copy(u["user_id"])
+            # String ID ko Int me convert karna zaroori hai
+            uid = int(person['user_id'])
+            await m.reply_to_message.copy(uid)
             ok += 1
-            await asyncio.sleep(0.1) # Thoda delay taaki floodwait na aaye
+            await asyncio.sleep(0.1) # Floodwait se bachne ke liye
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            # Retry logic
+            try:
+                await m.reply_to_message.copy(uid)
+                ok += 1
+            except:
+                fail += 1
         except Exception:
             fail += 1
 
-    await status.edit(f"✅ Success: {ok} | ❌ Failed: {fail}")
+    await msg.edit(f"✅ **Broadcast Complete**\n\nSuccess: {ok}\nFailed: {fail}")
 
-# ---------- Web Server for Render (Keep Alive) ----------
-async def handle_index(request):
-    return web.Response(text="🤖 Bot is alive and running!")
-
-async def start_web_server():
-    # Render PORT env variable automatic utha lega
-    port = int(os.environ.get("PORT", "8080"))
-    app = web.Application()
-    app.router.add_get('/', handle_index)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    log.info(f"🌍 Web server started on port {port}")
-    return runner
-
-# ---------- Main Loop ----------
+# ---------- Main Execution ----------
 async def main():
-    # 1. Start Web Server
+    # Web Server Start
     web_runner = await start_web_server()
 
-    # 2. Start Bot
-    print("🤖 Bot Starting...")
+    # Bot Start
+    print("🤖 Bot Started...")
     await bot.start()
-    print("✅ Bot is Online!")
+    
+    # Idle state me rakhna
+    await idle()
 
-    # 3. Idle Loop
-    try:
-        await idle()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        await bot.stop()
-        await web_runner.cleanup()
+    # Stop process
+    await bot.stop()
+    await web_runner.cleanup()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+    except Exception as e:
+        print(f"Error: {e}")
 
