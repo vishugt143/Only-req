@@ -2,6 +2,8 @@ pyrofork
 TgCrypto
 pymongo[srv]
 aiohttp
+setuptools
+gunicorn
 Flask==1.1.2
 gunicorn>=21.2.0
 Jinja2==3.0.3
