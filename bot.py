@@ -1,5 +1,5 @@
 # Don't Remove Credit @teacher_slex
-# Modified by You
+# Modified Clean Version
 
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram import filters, Client, errors
@@ -7,6 +7,7 @@ from pyrogram.errors.exceptions.flood_420 import FloodWait
 from database import add_user, add_group, all_users, all_groups, users
 from configs import cfg
 import asyncio
+import re
 
 app = Client(
     "approver",
@@ -15,7 +16,7 @@ app = Client(
     bot_token=cfg.BOT_TOKEN
 )
 
-#━━━━━━━━━━━━━━━━━━━━ JOIN REQUEST (10 SEC DELAY APPROVE + WELCOME) ━━━━━━━━━━━━━━━━━━━━
+#━━━━━━━━━━━━━━━━━━━━ JOIN REQUEST (10 SEC DELAY) ━━━━━━━━━━━━━━━━━━━━
 @app.on_chat_join_request(filters.group | filters.channel)
 async def approve(_, m):
     chat = m.chat
@@ -36,7 +37,7 @@ async def approve(_, m):
             user.id,
             f"👋 Hello {user.first_name}!\n\n"
             "✅ Aapka join request approve ho gaya hai.\n"
-            "🎉 Welcome to the Channel!"
+            "🎉 Welcome to the group!"
         )
 
     except FloodWait as e:
@@ -45,6 +46,31 @@ async def approve(_, m):
         pass
     except:
         pass
+#━━━━━━━━━━━━━━━━━━━━ ILLEGAL WORD DELETE (NO BAN) ━━━━━━━━━━━━━━━━━━━━
+@app.on_message(filters.group & filters.text)
+async def illegal_filter(_, m: Message):
+
+    if not m.from_user:
+        return
+
+    # 🔹 SUDO exempt
+    if m.from_user.id in cfg.SUDO:
+        return
+
+    text = m.text.lower()
+
+    for word in cfg.ILLEGAL_WORDS:
+        pattern = r"\b" + re.escape(word.lower()) + r"\b"
+        if re.search(pattern, text):
+            try:
+                await m.delete()
+
+                await m.chat.send_message(
+                    f"⚠️ {m.from_user.mention}, illegal words allowed nahi hain."
+                )
+            except:
+                pass
+            break
 
 
 #━━━━━━━━━━━━━━━━━━━━ START COMMAND ━━━━━━━━━━━━━━━━━━━━
@@ -54,8 +80,7 @@ async def start(_, m: Message):
 
     await m.reply_text(
         "🤖 Hello!\n\n"
-        "Main auto approve bot hoon.\n"
-        "Join request aayegi to 10 sec baad approve karunga."
+        "Main auto approve bot hoon."
     )
 
 
@@ -70,6 +95,7 @@ async def users_count(_, m: Message):
 #━━━━━━━━━━━━━━━━━━━━ BROADCAST ━━━━━━━━━━━━━━━━━━━━
 @app.on_message(filters.command("bcast") & filters.user(cfg.SUDO))
 async def bcast(_, m: Message):
+
     if not m.reply_to_message:
         return await m.reply("Reply to a message to broadcast.")
 
