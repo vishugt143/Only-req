@@ -8,209 +8,207 @@ import re
 import asyncio
 import logging
 from aiohttp import web
-from pyrogram import Client, filters, idle, errors
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, ChatJoinRequest
-from pyrogram.errors.exceptions.flood_420 import FloodWait
+from pyrogram.errors import FloodWait, UserAlreadyParticipant, PeerIdInvalid
 
-# Aapka database.py import
-from database import add_user, add_group, all_users, all_groups, users
+# Database aur Config imports
+# Make sure database.py aur configs.py same folder me ho
+from database import add_user, add_group, all_users, all_groups, users as users_collection
 from configs import cfg
 
-# Logging Setup (Debugging ke liye zaroori hai)
+# Logging Setup (Error dekhne ke liye)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
-# ---------- Pyrogram Client ----------
+# Bot Client Setup
 bot = Client(
-    "approver",
+    "approver_bot",
     api_id=cfg.API_ID,
     api_hash=cfg.API_HASH,
     bot_token=cfg.BOT_TOKEN
 )
 
-# ---------- Helper Functions ----------
-
-async def handle_index(request):
-    """Web Server ka response taaki Render sota na rahe"""
-    return web.Response(text="Bot is Running Successfully!")
+# ------------------ WEB SERVER (RENDER KEEP ALIVE) ------------------
+async def web_handler(request):
+    return web.Response(text="🤖 Bot is Running Successfully!")
 
 async def start_web_server():
-    """Render ke liye Fake Web Server"""
-    port = int(os.environ.get("PORT", "8080"))
+    # Render environment se PORT uthayega, warna 8080 use karega
+    port = int(os.environ.get("PORT", 8080))
     app = web.Application()
-    app.router.add_get('/', handle_index)
+    app.router.add_get("/", web_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    log.info(f"🌍 Web Server Started on Port {port}")
-    return runner
+    logger.info(f"🌍 Web Server started on Port {port}")
 
-#━━━━━━━━━━━━━━━━━━━━ JOIN REQUEST (10 SEC DELAY) ━━━━━━━━━━━━━━━━━━━━
+# ------------------ JOIN REQUEST HANDLER ------------------
 @bot.on_chat_join_request()
-async def approve(client: Client, m: ChatJoinRequest):
+async def auto_approve(client: Client, req: ChatJoinRequest):
     try:
-        chat = m.chat
-        user = m.from_user
+        chat = req.chat
+        user = req.from_user
         
-        log.info(f"📥 New Request: {user.first_name} in {chat.title}")
+        logger.info(f"📥 New Request: {user.first_name} | Chat: {chat.title}")
 
-        # Database me add karo
+        # Database Update
         try:
-            add_group(chat.id)
             add_user(user.id)
+            add_group(chat.id)
         except Exception as e:
-            log.error(f"DB Error: {e}")
+            logger.error(f"DB Error: {e}")
 
-        # ⏳ 10 SECOND WAIT
+        # ⏳ 10 Seconds Wait
         await asyncio.sleep(10)
 
-        # ✅ APPROVE REQUEST
+        # ✅ Approve Request
         try:
             await client.approve_chat_join_request(chat.id, user.id)
-            log.info(f"✅ Approved: {user.first_name}")
-        except errors.UserAlreadyParticipant:
-            pass
+            logger.info(f"✅ Approved: {user.first_name}")
+        except UserAlreadyParticipant:
+            pass # Already approved
         except Exception as e:
-            log.error(f"Approval Failed: {e}")
-            return
+            logger.error(f"Approval Failed: {e}")
+            return # Agar approve nahi hua to welcome msg mat bhejo
 
-        # ✅ WELCOME MESSAGE (DM)
+        # 👋 Welcome Message
         try:
             await client.send_message(
-                user.id,
-                f"👋 Hello {user.first_name}!\n\n"
-                f"✅ Your request to join **{chat.title}** has been approved.\n"
-                "🎉 Welcome!"
+                chat_id=user.id,
+                text=(
+                    f"👋 Hello {user.mention}!\n\n"
+                    f"✅ Your request to join **{chat.title}** has been approved.\n"
+                    "🎉 Welcome to the community!"
+                )
             )
-        except Exception:
-            pass # User blocked bot or privacy settings
+        except (PeerIdInvalid, Exception):
+            # User ne bot start nahi kiya ya block kiya hai
+            pass
 
     except FloodWait as e:
+        logger.warning(f"FloodWait: Sleeping for {e.value}s")
         await asyncio.sleep(e.value)
     except Exception as e:
-        log.error(f"Error in approve: {e}")
+        logger.error(f"Handler Error: {e}")
 
-#━━━━━━━━━━━━━━━━━━━━ ILLEGAL WORDS (BAN FILTER) ━━━━━━━━━━━━━━━━━━━━
+# ------------------ ILLEGAL WORDS FILTER ------------------
 @bot.on_message(filters.group & filters.text)
-async def illegal_filter(_, m: Message):
+async def delete_banned_words(_, m: Message):
     if not m.from_user:
         return
-
+        
     # Admin (SUDO) ko ignore karo
     if m.from_user.id in cfg.SUDO:
         return
 
-    text = (m.text or "").lower()
-
+    text = m.text.lower()
+    
     for word in cfg.ILLEGAL_WORDS:
-        # Sirf exact word match karega (e.g. "Hell" won't delete "Hello")
-        pattern = r"\b" + re.escape(word.lower()) + r"\b"
-        
-        if re.search(pattern, text):
+        # Regex check for exact word match
+        if re.search(r"\b" + re.escape(word.lower()) + r"\b", text):
             try:
                 await m.delete()
-                # Optional Warning
-                msg = await m.reply(f"⚠️ {m.from_user.mention}, illegal words are not allowed!")
+                warning = await m.reply(f"⚠️ {m.from_user.mention}, using '{word}' is not allowed!")
                 await asyncio.sleep(5)
-                await msg.delete()
+                await warning.delete()
             except Exception:
                 pass
-            break
+            return # Ek word mil gaya to loop band karo
 
-#━━━━━━━━━━━━━━━━━━━━ START COMMAND ━━━━━━━━━━━━━━━━━━━━
+# ------------------ START COMMAND ------------------
 @bot.on_message(filters.private & filters.command("start"))
-async def start(_, m: Message):
+async def start_cmd(_, m: Message):
     add_user(m.from_user.id)
+    
+    # Buttons
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Channel", url="https://t.me/lnx_store")],
+        [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/teacher_slex")]
+    ])
 
-    if m.from_user.id not in cfg.SUDO:
+    if m.from_user.id in cfg.SUDO:
         await m.reply_text(
-            "👋 **Hello!**\n"
-            "I am an Auto Approver Bot.\n"
-            "Join any of my groups and I will accept you after 10 seconds!"
+            f"👋 **Hello Admin!**\n\nBot is running.\n/users - Check Stats\n/bcast - Broadcast Message",
+            reply_markup=buttons
         )
-        return
+    else:
+        await m.reply_text(
+            "👋 **Hello!**\nI am an Auto Approver Bot.\nJoin my groups and I will accept you automatically.",
+            reply_markup=buttons
+        )
 
-    # Admin Panel
-    keyboard = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("📢 Channel", url="https://t.me/lnx_store"),
-            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/teacher_slex")
-        ]]
-    )
-
-    await m.reply_photo(
-        photo="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhsaR6kRdTPF2ZMEgmgSYjjXU6OcsJhkBe1EWtI1nfbOziINTYzxjlGCMSVh-KoH05Z8MpRWhVV9TIX_ykpjdeGqJ1atXy1TUqrVkohUxlykoZyl67EfMQppHoWYrdHmdi6FMcL9v-Vew2VtaWHWY_eGZt-GN057jLGvYj7UV49g0rXVxoDFXQAYxvaX1xP/s1280/75447.jpg",
-        caption=f"**👮‍♂️ Admin Panel**\n\nHello Boss {m.from_user.mention}!",
-        reply_markup=keyboard
-    )
-
-#━━━━━━━━━━━━━━━━━━━━ USERS & GROUPS STATS ━━━━━━━━━━━━━━━━━━━━
+# ------------------ ADMIN COMMANDS ------------------
 @bot.on_message(filters.command("users") & filters.user(cfg.SUDO))
-async def users_count(_, m: Message):
-    # Aapke database.py ke functions call ho rahe hain
-    u_count = all_users()
-    g_count = all_groups()
-    await m.reply_text(f"📊 **Stats:**\n\n👤 Users: `{u_count}`\n👥 Groups: `{g_count}`")
+async def stats(_, m: Message):
+    # Database.py functions use kar rahe hain
+    try:
+        u = all_users()
+        g = all_groups()
+        await m.reply_text(f"📊 **Stats:**\n\n👤 Users: `{u}`\n👥 Groups: `{g}`")
+    except Exception as e:
+        await m.reply_text(f"Error fetching stats: {e}")
 
-#━━━━━━━━━━━━━━━━━━━━ BROADCAST COMMAND ━━━━━━━━━━━━━━━━━━━━
 @bot.on_message(filters.command("bcast") & filters.user(cfg.SUDO))
-async def bcast(_, m: Message):
+async def broadcast_msg(_, m: Message):
     if not m.reply_to_message:
-        return await m.reply("❌ Please reply to a message to broadcast.")
+        return await m.reply("❌ Reply to a message to broadcast.")
 
-    msg = await m.reply("⚡ Broadcasting started...")
-    ok = 0
-    fail = 0
+    msg = await m.reply("⏳ Broadcasting...")
+    count, fail = 0, 0
     
-    # Aapka database 'users' collection hai.
-    # Aapke DB me user_id STRING format me hai, Pyrogram ko INT chahiye.
-    all_users_cursor = users.find({}) 
-
-    for person in all_users_cursor:
-        try:
-            # String ID ko Int me convert karna zaroori hai
-            uid = int(person['user_id'])
-            await m.reply_to_message.copy(uid)
-            ok += 1
-            await asyncio.sleep(0.1) # Floodwait se bachne ke liye
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            # Retry logic
+    # Database se users fetch karo
+    # Note: Aapke DB me user_id String hai, usko Int banana padega
+    try:
+        # Cursor object return hota hai, us par loop chalayenge
+        all_users_cursor = users_collection.find({})
+        
+        for user_doc in all_users_cursor:
             try:
-                await m.reply_to_message.copy(uid)
-                ok += 1
-            except:
+                user_id = int(user_doc['user_id'])
+                await m.reply_to_message.copy(user_id)
+                count += 1
+                await asyncio.sleep(0.1) # Floodwait prevention
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                # Retry logic
+                try:
+                    await m.reply_to_message.copy(user_id)
+                    count += 1
+                except:
+                    fail += 1
+            except Exception:
                 fail += 1
-        except Exception:
-            fail += 1
+                
+        await msg.edit(f"✅ **Broadcast Completed**\n\nSent: `{count}`\nFailed: `{fail}`")
+    except Exception as e:
+        await msg.edit(f"❌ Broadcast Error: {e}")
 
-    await msg.edit(f"✅ **Broadcast Complete**\n\nSuccess: {ok}\nFailed: {fail}")
-
-# ---------- Main Execution ----------
+# ------------------ MAIN LOOP ------------------
 async def main():
-    # Web Server Start
-    web_runner = await start_web_server()
-
-    # Bot Start
-    print("🤖 Bot Started...")
-    await bot.start()
+    # 1. Start Web Server first
+    await start_web_server()
     
-    # Idle state me rakhna
+    # 2. Start Bot
+    logger.info("🤖 Starting Bot...")
+    await bot.start()
+    logger.info("✅ Bot is Online!")
+    
+    # 3. Keep running
     await idle()
-
-    # Stop process
+    
+    # 4. Stop
     await bot.stop()
-    await web_runner.cleanup()
 
 if __name__ == "__main__":
+    # Windows/Linux compatibility
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f"Error: {e}")
-
+        logger.error(f"Critical Error: {e}")
