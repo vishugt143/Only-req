@@ -1,6 +1,5 @@
 # Don't Remove Credit @teacher_slex
-# Subscribe YouTube ƈɦǟռռɛʟ For Amazing Bot @Tech_VJ
-# Ask Doubt on telegram @KingVJ01
+# Modified by You
 
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram import filters, Client, errors
@@ -16,97 +15,49 @@ app = Client(
     bot_token=cfg.BOT_TOKEN
 )
 
-#━━━━━━━━━━━━━━━━━━━━ HELPER ━━━━━━━━━━━━━━━━━━━━
-def parse_post_link(link: str):
-    parts = link.split("/")
-    chat = parts[-2]
-    msg_id = int(parts[-1])
-    return chat, msg_id
-
-#━━━━━━━━━━━━━━━━━━━━ JOIN REQUEST (NO APPROVE, ONLY DM) ━━━━━━━━━━━━━━━━━━━━
+#━━━━━━━━━━━━━━━━━━━━ JOIN REQUEST (10 SEC DELAY APPROVE + WELCOME) ━━━━━━━━━━━━━━━━━━━━
 @app.on_chat_join_request(filters.group | filters.channel)
-async def approve(_, m: Message):
-    op = m.chat
+async def approve(_, m):
+    chat = m.chat
     user = m.from_user
+
     try:
-        add_group(op.id)
+        add_group(chat.id)
         add_user(user.id)
 
-        # ❌ JOIN REQUEST APPROVE NAHI HOGA
-        # await app.approve_chat_join_request(op.id, user.id)
+        # ⏳ 10 SECOND DELAY
+        await asyncio.sleep(10)
 
-        # ✅ USER KO DM
+        # ✅ APPROVE REQUEST
+        await app.approve_chat_join_request(chat.id, user.id)
+
+        # ✅ WELCOME MESSAGE
         await app.send_message(
             user.id,
-            f"👋 Hello • {user.first_name}\n\n"
-            "❌ Aapka join request approve nahi hua.\n"
-            "📩 Lekin important info DM me bhej di gayi hai 👇"
+            f"👋 Hello {user.first_name}!\n\n"
+            "✅ Aapka join request approve ho gaya hai.\n"
+            "🎉 Welcome to the Channel!"
         )
 
-        # ✅ PROMO / APK / VIDEO SEND
-        for link in cfg.POSTS:
-            try:
-                chat_id, msg_id = parse_post_link(link)
-                await app.copy_message(
-                    chat_id=user.id,
-                    from_chat_id=chat_id,
-                    message_id=msg_id
-                )
-                await asyncio.sleep(1)
-            except:
-                pass
-
-    except errors.PeerIdInvalid:
-        pass
     except FloodWait as e:
         await asyncio.sleep(e.value)
+    except errors.PeerIdInvalid:
+        pass
     except:
         pass
+
 
 #━━━━━━━━━━━━━━━━━━━━ START COMMAND ━━━━━━━━━━━━━━━━━━━━
 @app.on_message(filters.private & filters.command("start"))
 async def start(_, m: Message):
     add_user(m.from_user.id)
 
-    # NORMAL USER
-    if m.from_user.id not in cfg.SUDO:
-        await m.reply_text(
-            "𝐁𝐇𝐀𝐈 𝐇𝐀𝐂𝐊 𝐒𝐄 𝐏𝐋𝐀𝐘 𝐊𝐑𝐎\n\n💸𝐏𝐑𝐎𝐅𝐈𝐓 𝐊𝐑𝐎🍻"
-        )
-
-        for link in cfg.POSTS:
-            try:
-                chat_id, msg_id = parse_post_link(link)
-                await app.copy_message(
-                    chat_id=m.from_user.id,
-                    from_chat_id=chat_id,
-                    message_id=msg_id
-                )
-                await asyncio.sleep(1)
-            except:
-                pass
-        return
-
-    # ADMIN HOME (NO JOIN CHECK)
-    keyboard = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("🗯 ƈɦǟռռɛʟ", url="https://t.me/lnx_store"),
-            InlineKeyboardButton("💬 Support", url="https://t.me/teacher_slex")
-        ]]
+    await m.reply_text(
+        "🤖 Hello!\n\n"
+        "Main auto approve bot hoon.\n"
+        "Join request aayegi to 10 sec baad approve karunga."
     )
 
-    await m.reply_photo(
-        photo="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhsaR6kRdTPF2ZMEgmgSYjjXU6OcsJhkBe1EWtI1nfbOziINTYzxjlGCMSVh-KoH05Z8MpRWhVV9TIX_ykpjdeGqJ1atXy1TUqrVkohUxlykoZyl67EfMQppHoWYrdHmdi6FMcL9v-Vew2VtaWHWY_eGZt-GN057jLGvYj7UV49g0rXVxoDFXQAYxvaX1xP/s1280/75447.jpg",
-        caption=(
-            f"**🦊 Hello {m.from_user.mention}!**\n\n"
-            "I'm an auto approve bot.\n"
-            "I handle join requests & DM users.\n\n"
-            "📢 Broadcast : /bcast\n"
-            "📊 Users : /users\n\n"
-            "__Powered By : @teacher_slex__"
-        ),
-        reply_markup=keyboard
-    )
 
 #━━━━━━━━━━━━━━━━━━━━ USERS COUNT ━━━━━━━━━━━━━━━━━━━━
 @app.on_message(filters.command("users") & filters.user(cfg.SUDO))
@@ -115,36 +66,25 @@ async def users_count(_, m: Message):
     g = all_groups()
     await m.reply_text(f"🙋 Users : `{u}`\n👥 Groups : `{g}`\n📊 Total : `{u+g}`")
 
-#━━━━━━━━━━━━━━━━━━━━ BROADCAST COPY ━━━━━━━━━━━━━━━━━━━━
+
+#━━━━━━━━━━━━━━━━━━━━ BROADCAST ━━━━━━━━━━━━━━━━━━━━
 @app.on_message(filters.command("bcast") & filters.user(cfg.SUDO))
 async def bcast(_, m: Message):
+    if not m.reply_to_message:
+        return await m.reply("Reply to a message to broadcast.")
+
     status = await m.reply("⚡ Broadcasting...")
     ok = fail = 0
+
     for u in users.find():
         try:
             await m.reply_to_message.copy(u["user_id"])
             ok += 1
         except:
             fail += 1
+
     await status.edit(f"✅ {ok} | ❌ {fail}")
 
-#━━━━━━━━━━━━━━━━━━━━ 🚫 AUTO DELETE ILLEGAL BOT MSG ━━━━━━━━━━━━━━━━━━━━
-@app.on_message(filters.me)
-async def auto_delete_illegal(_, m: Message):
-    try:
-        content = ""
-        if m.text:
-            content = m.text.lower()
-        elif m.caption:
-            content = m.caption.lower()
-
-        for word in cfg.ILLEGAL_WORDS:
-            if word.lower() in content:
-                await asyncio.sleep(0.1)
-                await m.delete()
-                return
-    except:
-        pass
 
 print("🤖 Bot is Alive!")
 app.run()
